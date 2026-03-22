@@ -187,6 +187,7 @@ export const useStore = create<AppState>((set, get) => ({
         model: selectedModel,
         scope: tab ? 'full_file' : 'attached_files',
         attached_files: [],
+        mode: 'chat',
       }
       if (tab) {
         body.file_path = tab.path

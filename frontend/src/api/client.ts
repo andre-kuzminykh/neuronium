@@ -7,7 +7,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const body = await res.text()
-    throw new Error(`API error ${res.status}: ${body}`)
+    let detail = body
+    try {
+      const parsed = JSON.parse(body)
+      if (parsed.detail) detail = parsed.detail
+    } catch { /* use raw body */ }
+    throw new Error(detail || `API error ${res.status}`)
   }
   return res.json()
 }

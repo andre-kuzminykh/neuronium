@@ -13,6 +13,7 @@ class OpenAIProvider(BaseProvider):
         file_path: str | None = None,
         file_type: str | None = None,
         attached_files: list[tuple[str, str]] | None = None,
+        mode: str = "canvas",
     ) -> str:
         async with httpx.AsyncClient(timeout=120) as client:
             response = await client.post(
@@ -24,7 +25,7 @@ class OpenAIProvider(BaseProvider):
                 json={
                     "model": self.model,
                     "messages": [
-                        {"role": "system", "content": self._build_system_prompt()},
+                        {"role": "system", "content": self._build_system_prompt(mode)},
                         {"role": "user", "content": self._build_user_message(
                             instruction, content, file_path, file_type, attached_files
                         )},
@@ -33,10 +34,8 @@ class OpenAIProvider(BaseProvider):
                     "max_completion_tokens": 4096,
                 },
             )
-            try:
-                response.raise_for_status()
-            except Exception:
-                err_body = response.text[:300]
-                raise ValueError(f"OpenAI error {response.status_code}: {err_body}")
+            if response.status_code != 200:
+                err_body = response.text[:500]
+                raise ValueError(f"OpenAI API error {response.status_code}: {err_body}")
             data = response.json()
             return data["choices"][0]["message"]["content"]

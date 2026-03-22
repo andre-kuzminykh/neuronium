@@ -27,10 +27,14 @@ class AiExecutionService:
             file_path=request.file_path,
             file_type=request.file_type,
             attached_files=[(f.path, f.content) for f in request.attached_files],
+            mode=request.mode,
         )
         latency_ms = int((time.time() - start_time) * 1000)
 
-        diff = compute_unified_diff(original_text, result_text, request.file_path or "")
+        if request.mode == "chat":
+            diff = None
+        else:
+            diff = compute_unified_diff(original_text, result_text, request.file_path or "")
 
         suggestion_id = str(uuid.uuid4())
 

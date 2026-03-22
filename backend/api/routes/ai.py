@@ -24,12 +24,16 @@ async def list_models():
 
 @router.post("/execute", response_model=AiSuggestion)
 async def execute(req: AiExecuteRequest, db: AsyncSession = Depends(get_db)):
+    import logging
+    logger = logging.getLogger("neuronium.ai")
     try:
         return await ai_execution_service.execute(db, req)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        detail = str(e) or f"{type(e).__name__}: unexpected error"
+        logger.exception("AI execute failed: %s", detail)
+        raise HTTPException(status_code=500, detail=detail)
 
 
 @router.post("/apply")

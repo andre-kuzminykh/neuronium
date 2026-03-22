@@ -72,6 +72,7 @@ class AiExecuteRequest(BaseModel):
     attached_files: list[AttachedFile] = []
     scope: AiScope = AiScope.FULL_FILE
     model: Optional[str] = None
+    mode: str = "canvas"  # "canvas" | "chat"
 
 
 class AttachedFile(BaseModel):

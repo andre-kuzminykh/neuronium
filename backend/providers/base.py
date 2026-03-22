@@ -7,7 +7,7 @@ class BaseProvider(ABC):
         self.api_key = api_key
         self.model = model
         if not api_key:
-            raise ValueError(f"API key not configured for provider")
+            raise ValueError(f"API key not configured for {type(self).__name__}. Add it to .env file.")
 
     @abstractmethod
     async def generate(
@@ -17,10 +17,22 @@ class BaseProvider(ABC):
         file_path: str | None = None,
         file_type: str | None = None,
         attached_files: list[tuple[str, str]] | None = None,
+        mode: str = "canvas",
     ) -> str:
         ...
 
-    def _build_system_prompt(self) -> str:
+    def _build_system_prompt(self, mode: str = "canvas") -> str:
+        if mode == "chat":
+            return (
+                "You are an AI assistant embedded in an IDE-like workspace. "
+                "The user has a file open and can ask questions about it. "
+                "Use the file content as context to answer the user's questions conversationally. "
+                "Answer in the same language as the user's message. "
+                "If the user asks you to modify or rewrite the content, return the modified content "
+                "wrapped in a <<<SUGGESTION>>> ... <<<END_SUGGESTION>>> block so the system can offer "
+                "to apply the changes. Outside that block, you may include brief explanations. "
+                "If the user simply asks a question, just answer it — do NOT wrap your answer in a suggestion block."
+            )
         return (
             "You are an AI writing assistant embedded in an IDE-like workspace. "
             "The user will give you an instruction and content from a file. "

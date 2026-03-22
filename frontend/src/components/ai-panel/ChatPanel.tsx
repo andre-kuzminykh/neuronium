@@ -1,11 +1,28 @@
 import { useState, useRef, useEffect } from 'react'
 import { useStore } from '../../store/useStore'
+import type { ChatMessage as ChatMessageType } from '../../types'
+
+function parseSuggestion(text: string): { message: string; suggestion: string | null } {
+  const startTag = '<<<SUGGESTION>>>'
+  const endTag = '<<<END_SUGGESTION>>>'
+  const startIdx = text.indexOf(startTag)
+  const endIdx = text.indexOf(endTag)
+  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
+    return { message: text, suggestion: null }
+  }
+  const before = text.slice(0, startIdx).trim()
+  const suggestion = text.slice(startIdx + startTag.length, endIdx).trim()
+  const after = text.slice(endIdx + endTag.length).trim()
+  const message = [before, after].filter(Boolean).join('\n')
+  return { message, suggestion }
+}
 
 export function ChatPanel() {
   const {
     chatPanelOpen, toggleChatPanel,
     chatMessages, chatLoading, sendChatMessage,
     activeTabPath, openTabs, selectedModel, availableModels, setSelectedModel,
+    canvasSuggestion, acceptCanvasSuggestion, rejectCanvasSuggestion, createFileFromCanvas,
   } = useStore()
 
   const [input, setInput] = useState('')
@@ -81,19 +98,82 @@ export function ChatPanel() {
               : 'Откройте файл чтобы начать беседу'}
           </p>
         )}
-        {messages.map(msg => (
-          <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-            <div className={`rounded px-2.5 py-1.5 text-xs max-w-[90%] whitespace-pre-wrap ${
-              msg.role === 'user'
-                ? 'bg-ide-accent text-white'
-                : msg.text.startsWith('❌')
-                  ? 'bg-red-900/40 text-red-300 border border-red-700'
-                  : 'bg-ide-tab text-ide-text border border-ide-border'
-            }`}>
-              {msg.text}
+        {messages.map(msg => {
+          if (msg.role === 'user') {
+            return (
+              <div key={msg.id} className="flex flex-col items-end">
+                <div className="rounded px-2.5 py-1.5 text-xs max-w-[90%] whitespace-pre-wrap bg-ide-accent text-white">
+                  {msg.text}
+                </div>
+              </div>
+            )
+          }
+          if (msg.text.startsWith('❌')) {
+            return (
+              <div key={msg.id} className="flex flex-col items-start">
+                <div className="rounded px-2.5 py-1.5 text-xs max-w-[90%] whitespace-pre-wrap bg-red-900/40 text-red-300 border border-red-700">
+                  {msg.text}
+                </div>
+              </div>
+            )
+          }
+          const { message, suggestion: suggestedContent } = parseSuggestion(msg.text)
+          const hasSuggestion = suggestedContent !== null && msg.suggestion
+          return (
+            <div key={msg.id} className="flex flex-col items-start gap-1">
+              {message && (
+                <div className="rounded px-2.5 py-1.5 text-xs max-w-[90%] whitespace-pre-wrap bg-ide-tab text-ide-text border border-ide-border">
+                  {message}
+                </div>
+              )}
+              {hasSuggestion && (
+                <div className="w-full rounded border border-ide-border bg-ide-bg p-2">
+                  <div className="text-[10px] text-ide-text-dim mb-1 uppercase font-semibold">Предложение изменений</div>
+                  <pre className="text-[11px] text-green-400 bg-ide-sidebar rounded p-2 overflow-x-auto max-h-40 mb-2 whitespace-pre-wrap">{suggestedContent}</pre>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        // Apply: set canvasSuggestion and accept
+                        useStore.setState({ canvasSuggestion: { ...msg.suggestion!, result_text: suggestedContent! } })
+                        acceptCanvasSuggestion()
+                      }}
+                      className="px-2 py-1 text-[11px] bg-green-700 hover:bg-green-600 text-white rounded"
+                    >
+                      ✓ Применить
+                    </button>
+                    <button
+                      onClick={() => {
+                        const newPath = prompt('Путь для нового файла:')
+                        if (newPath) {
+                          useStore.setState({ canvasSuggestion: { ...msg.suggestion!, result_text: suggestedContent! } })
+                          createFileFromCanvas(newPath)
+                        }
+                      }}
+                      className="px-2 py-1 text-[11px] bg-blue-700 hover:bg-blue-600 text-white rounded"
+                    >
+                      + Новый файл
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (msg.suggestion) {
+                          useStore.getState().rejectCanvasSuggestion()
+                        }
+                      }}
+                      className="px-2 py-1 text-[11px] bg-ide-sidebar hover:bg-ide-hover text-ide-text-dim rounded border border-ide-border"
+                    >
+                      ✕ Отмена
+                    </button>
+                  </div>
+                </div>
+              )}
+              {!hasSuggestion && suggestedContent && (
+                <div className="rounded px-2.5 py-1.5 text-xs max-w-[90%] whitespace-pre-wrap bg-ide-tab text-ide-text border border-ide-border">
+                  {suggestedContent}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          )
+        })}
         {chatLoading && (
           <div className="flex items-start">
             <div className="bg-ide-tab border border-ide-border rounded px-2.5 py-1.5 text-xs text-ide-text-dim animate-pulse">

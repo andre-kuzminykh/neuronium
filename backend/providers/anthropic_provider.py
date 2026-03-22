@@ -13,6 +13,7 @@ class AnthropicProvider(BaseProvider):
         file_path: str | None = None,
         file_type: str | None = None,
         attached_files: list[tuple[str, str]] | None = None,
+        mode: str = "canvas",
     ) -> str:
         async with httpx.AsyncClient(timeout=120) as client:
             response = await client.post(
@@ -24,7 +25,7 @@ class AnthropicProvider(BaseProvider):
                 },
                 json={
                     "model": self.model,
-                    "system": self._build_system_prompt(),
+                    "system": self._build_system_prompt(mode),
                     "messages": [
                         {"role": "user", "content": self._build_user_message(
                             instruction, content, file_path, file_type, attached_files
