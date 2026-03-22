@@ -30,7 +30,7 @@ class OpenAIProvider(BaseProvider):
                         )},
                     ],
                     "temperature": 0.3,
-                    "max_tokens": 4096,
+                    "max_completion_tokens": 4096,
                 },
             )
             try:
