@@ -26,6 +26,7 @@ export interface SessionState {
   active_tab: string | null
   selected_model: string | null
   ai_panel_open: boolean
+  chat_panel_open: boolean
   file_modes: Record<string, string>
 }
 
@@ -43,6 +44,14 @@ export interface AiSuggestion {
   model_name: string
   command_text: string
   latency_ms: number | null
+}
+
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  suggestion?: AiSuggestion
+  created_at: string
 }
 
 export interface ModelInfo {

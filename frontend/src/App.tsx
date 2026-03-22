@@ -2,7 +2,8 @@ import { useEffect } from 'react'
 import { useStore } from './store/useStore'
 import { Sidebar } from './components/layout/Sidebar'
 import { EditorArea } from './components/editor/EditorArea'
-import { AiBottomPanel } from './components/ai-panel/AiBottomPanel'
+import { ChatPanel } from './components/ai-panel/ChatPanel'
+import { TaskBar } from './components/task-bar/TaskBar'
 import { ConnectRepoDialog } from './components/common/ConnectRepoDialog'
 
 export default function App() {
@@ -13,11 +14,13 @@ export default function App() {
     loadModels()
   }, [])
 
+  // Persist session debounced
   useEffect(() => {
-    const timer = setTimeout(() => persistSession(), 2000)
-    return () => clearTimeout(timer)
+    const t = setTimeout(() => persistSession(), 2000)
+    return () => clearTimeout(t)
   })
 
+  // Ctrl+S to save
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -29,17 +32,21 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  if (!activeRepo) {
-    return <ConnectRepoDialog />
-  }
+  if (!activeRepo) return <ConnectRepoDialog />
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-ide-bg text-ide-text">
+      {/* Left: file tree */}
       <Sidebar />
+
+      {/* Center + bottom: editor area + task bar */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <EditorArea />
-        <AiBottomPanel />
+        <TaskBar />
       </div>
+
+      {/* Right: chat panel (toggleable) */}
+      <ChatPanel />
     </div>
   )
 }

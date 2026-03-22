@@ -33,6 +33,10 @@ class OpenAIProvider(BaseProvider):
                     "max_tokens": 4096,
                 },
             )
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except Exception:
+                err_body = response.text[:300]
+                raise ValueError(f"OpenAI error {response.status_code}: {err_body}")
             data = response.json()
             return data["choices"][0]["message"]["content"]

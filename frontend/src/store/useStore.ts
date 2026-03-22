@@ -1,5 +1,8 @@
 import { create } from 'zustand'
-import type { FileNode, RepoInfo, Tab, AiSuggestion, ModelInfo, AttachedFile, FileMode } from '../types'
+import type {
+  FileNode, RepoInfo, Tab, AiSuggestion, ModelInfo,
+  AttachedFile, FileMode, ChatMessage,
+} from '../types'
 import { api } from '../api/client'
 
 export type SearchScope = 'files' | 'internet'
@@ -22,42 +25,55 @@ interface AppState {
   toggleFileMode: (path: string) => void
   getActiveTab: () => Tab | undefined
 
-  // AI Panel (bottom drawer)
-  aiPanelOpen: boolean
-  toggleAiPanel: () => void
+  // Chat panel (right) - conversational
+  chatPanelOpen: boolean
+  toggleChatPanel: () => void
+  chatMessages: Record<string, ChatMessage[]>   // keyed by file path
+  chatLoading: boolean
+  sendChatMessage: (text: string) => Promise<void>
+
+  // Task bar (bottom) - canvas mode
+  taskBarOpen: boolean
+  toggleTaskBar: () => void
+  taskInstruction: string
+  setTaskInstruction: (v: string) => void
+  taskAttachedFiles: AttachedFile[]
+  addTaskFile: (file: AttachedFile) => void
+  removeTaskFile: (path: string) => void
+  activeTool: 'none' | 'search'
+  setActiveTool: (t: 'none' | 'search') => void
+  searchScope: SearchScope
+  setSearchScope: (s: SearchScope) => void
+  runTask: () => Promise<void>
+  taskLoading: boolean
+
+  // Canvas suggestion (shown overlaid on editor)
+  canvasSuggestion: AiSuggestion | null
+  acceptCanvasSuggestion: () => Promise<void>
+  rejectCanvasSuggestion: () => void
+  createFileFromCanvas: (newPath: string) => Promise<void>
+
+  // AI error
+  aiError: string | null
+  clearAiError: () => void
+
+  // Model
   selectedModel: string | null
   setSelectedModel: (model: string) => void
   availableModels: ModelInfo[]
   loadModels: () => Promise<void>
-
-  // AI Context
-  attachedFiles: AttachedFile[]
-  addAttachedFile: (file: AttachedFile) => void
-  removeAttachedFile: (path: string) => void
-  clearAttachedFiles: () => void
-
-  // AI Tool (search)
-  activeTool: 'none' | 'search'
-  setActiveTool: (tool: 'none' | 'search') => void
-  searchScope: SearchScope
-  setSearchScope: (scope: SearchScope) => void
-
-  // AI Execution — per-file history
-  aiLoading: boolean
-  currentSuggestion: AiSuggestion | null
-  aiHistoryByFile: Record<string, AiSuggestion[]>  // keyed by file path
-  executeAi: (instruction: string) => Promise<void>
-  acceptSuggestion: () => Promise<void>
-  rejectSuggestion: () => void
-  createFileFromSuggestion: (newPath: string) => Promise<void>
 
   // Session
   restoreSession: () => Promise<void>
   persistSession: () => Promise<void>
 }
 
+function makeId() {
+  return Math.random().toString(36).slice(2)
+}
+
 export const useStore = create<AppState>((set, get) => ({
-  // --- Repo ---
+  // ── Repo ──────────────────────────────────────────────────────────────────
   activeRepo: null,
   fileTree: [],
   setActiveRepo: (repo) => {
@@ -71,18 +87,17 @@ export const useStore = create<AppState>((set, get) => ({
       const tree = await api.getTree(repo.id) as FileNode[]
       set({ fileTree: tree })
     } catch (e) {
-      console.error('Failed to load tree:', e)
+      console.error('load tree:', e)
     }
   },
 
-  // --- Tabs ---
+  // ── Tabs ──────────────────────────────────────────────────────────────────
   openTabs: [],
   activeTabPath: null,
   openFile: async (path, name) => {
     const repo = get().activeRepo
     if (!repo) return
-    const existing = get().openTabs.find(t => t.path === path)
-    if (existing) {
+    if (get().openTabs.find(t => t.path === path)) {
       set({ activeTabPath: path })
       return
     }
@@ -99,15 +114,17 @@ export const useStore = create<AppState>((set, get) => ({
       }
       set(s => ({ openTabs: [...s.openTabs, tab], activeTabPath: path }))
     } catch (e) {
-      console.error('Failed to open file:', e)
+      console.error('open file:', e)
     }
   },
   closeTab: (path) => set(s => {
     const tabs = s.openTabs.filter(t => t.path !== path)
-    const activeTabPath = s.activeTabPath === path
-      ? (tabs.length > 0 ? tabs[tabs.length - 1].path : null)
-      : s.activeTabPath
-    return { openTabs: tabs, activeTabPath }
+    return {
+      openTabs: tabs,
+      activeTabPath: s.activeTabPath === path
+        ? (tabs.length > 0 ? tabs[tabs.length - 1].path : null)
+        : s.activeTabPath,
+    }
   }),
   setActiveTab: (path) => set({ activeTabPath: path }),
   updateTabContent: (path, content) => set(s => ({
@@ -119,7 +136,7 @@ export const useStore = create<AppState>((set, get) => ({
     const { activeTabPath, openTabs, activeRepo } = get()
     if (!activeTabPath || !activeRepo) return
     const tab = openTabs.find(t => t.path === activeTabPath)
-    if (!tab || !tab.dirty) return
+    if (!tab?.dirty) return
     try {
       await api.saveFile(activeRepo.id, tab.path, tab.content)
       set(s => ({
@@ -128,7 +145,7 @@ export const useStore = create<AppState>((set, get) => ({
         ),
       }))
     } catch (e) {
-      console.error('Failed to save:', e)
+      console.error('save:', e)
     }
   },
   toggleFileMode: (path) => set(s => ({
@@ -141,9 +158,180 @@ export const useStore = create<AppState>((set, get) => ({
     return openTabs.find(t => t.path === activeTabPath)
   },
 
-  // --- AI Panel ---
-  aiPanelOpen: false,
-  toggleAiPanel: () => set(s => ({ aiPanelOpen: !s.aiPanelOpen })),
+  // ── Chat Panel (right, conversational) ────────────────────────────────────
+  chatPanelOpen: false,
+  toggleChatPanel: () => set(s => ({ chatPanelOpen: !s.chatPanelOpen })),
+  chatMessages: {},
+  chatLoading: false,
+  sendChatMessage: async (text) => {
+    const { activeTabPath, openTabs, activeRepo, selectedModel } = get()
+    const tab = openTabs.find(t => t.path === activeTabPath)
+    const fileKey = activeTabPath || '__global__'
+
+    const userMsg: ChatMessage = {
+      id: makeId(), role: 'user', text,
+      created_at: new Date().toISOString(),
+    }
+    set(s => ({
+      chatMessages: {
+        ...s.chatMessages,
+        [fileKey]: [...(s.chatMessages[fileKey] || []), userMsg],
+      },
+      chatLoading: true,
+      aiError: null,
+    }))
+
+    try {
+      const body: any = {
+        instruction: text,
+        model: selectedModel,
+        scope: tab ? 'full_file' : 'attached_files',
+        attached_files: [],
+      }
+      if (tab) {
+        body.file_path = tab.path
+        body.file_type = tab.name.split('.').pop() || 'txt'
+        body.full_file_content = tab.content
+      }
+
+      const suggestion = await api.executeAi(body) as AiSuggestion
+      const assistantMsg: ChatMessage = {
+        id: makeId(), role: 'assistant',
+        text: suggestion.result_text,
+        suggestion,
+        created_at: new Date().toISOString(),
+      }
+      set(s => ({
+        chatMessages: {
+          ...s.chatMessages,
+          [fileKey]: [...(s.chatMessages[fileKey] || []), assistantMsg],
+        },
+        chatLoading: false,
+      }))
+    } catch (e: any) {
+      const errMsg = e?.message || 'AI error'
+      set(s => ({
+        chatMessages: {
+          ...s.chatMessages,
+          [fileKey]: [...(s.chatMessages[fileKey] || []), {
+            id: makeId(), role: 'assistant',
+            text: `❌ ${errMsg}`,
+            created_at: new Date().toISOString(),
+          }],
+        },
+        chatLoading: false,
+        aiError: errMsg,
+      }))
+    }
+  },
+
+  // ── Task Bar (bottom, canvas mode) ────────────────────────────────────────
+  taskBarOpen: true,
+  toggleTaskBar: () => set(s => ({ taskBarOpen: !s.taskBarOpen })),
+  taskInstruction: '',
+  setTaskInstruction: (v) => set({ taskInstruction: v }),
+  taskAttachedFiles: [],
+  addTaskFile: (file) => set(s => {
+    if (s.taskAttachedFiles.some(f => f.path === file.path)) return s
+    return { taskAttachedFiles: [...s.taskAttachedFiles, file] }
+  }),
+  removeTaskFile: (path) => set(s => ({
+    taskAttachedFiles: s.taskAttachedFiles.filter(f => f.path !== path),
+  })),
+  activeTool: 'none',
+  setActiveTool: (t) => set({ activeTool: t }),
+  searchScope: 'files',
+  setSearchScope: (s) => set({ searchScope: s }),
+  taskLoading: false,
+  runTask: async () => {
+    const {
+      taskInstruction, openTabs, activeTabPath, activeRepo,
+      selectedModel, taskAttachedFiles, activeTool, searchScope,
+    } = get()
+    if (!taskInstruction.trim() || !activeRepo) return
+    const tab = openTabs.find(t => t.path === activeTabPath)
+
+    set({ taskLoading: true, canvasSuggestion: null, aiError: null })
+    try {
+      let contextFiles = [...taskAttachedFiles]
+
+      // Search tool: auto-gather file context
+      if (activeTool === 'search' && searchScope === 'files') {
+        const results = await api.searchFiles(activeRepo.id, taskInstruction) as any[]
+        for (const r of results.slice(0, 5)) {
+          if (contextFiles.some(f => f.path === r.path)) continue
+          try {
+            const f = await api.getFile(activeRepo.id, r.path) as any
+            if (!f.is_binary) contextFiles.push({ path: r.path, content: f.content })
+          } catch { /* skip */ }
+        }
+      }
+
+      const body: any = {
+        instruction: taskInstruction,
+        model: selectedModel,
+        scope: tab ? 'full_file' : 'attached_files',
+        attached_files: contextFiles,
+      }
+      if (tab) {
+        body.file_path = tab.path
+        body.file_type = tab.name.split('.').pop() || 'txt'
+        body.full_file_content = tab.content
+      }
+
+      const suggestion = await api.executeAi(body) as AiSuggestion
+      set({ canvasSuggestion: suggestion, taskLoading: false })
+    } catch (e: any) {
+      const errMsg = e?.message || 'AI error'
+      set({ taskLoading: false, aiError: errMsg })
+    }
+  },
+
+  // ── Canvas Suggestion ──────────────────────────────────────────────────────
+  canvasSuggestion: null,
+  acceptCanvasSuggestion: async () => {
+    const { canvasSuggestion, activeRepo } = get()
+    if (!canvasSuggestion || !activeRepo) return
+    try {
+      await api.applyAi(canvasSuggestion.id, activeRepo.id)
+      if (canvasSuggestion.file_path) {
+        const file = await api.getFile(activeRepo.id, canvasSuggestion.file_path) as any
+        set(s => ({
+          canvasSuggestion: { ...canvasSuggestion, status: 'accepted' },
+          openTabs: s.openTabs.map(t =>
+            t.path === canvasSuggestion.file_path
+              ? { ...t, content: file.content, savedContent: file.content, dirty: false }
+              : t
+          ),
+        }))
+      }
+    } catch (e: any) {
+      set({ aiError: e?.message || 'Apply failed' })
+    }
+  },
+  rejectCanvasSuggestion: () => {
+    const { canvasSuggestion } = get()
+    if (!canvasSuggestion) return
+    api.rejectAi(canvasSuggestion.id).catch(console.error)
+    set({ canvasSuggestion: null })
+  },
+  createFileFromCanvas: async (newPath) => {
+    const { canvasSuggestion, activeRepo } = get()
+    if (!canvasSuggestion || !activeRepo) return
+    try {
+      await api.createFileFromResult(canvasSuggestion.id, newPath, activeRepo.id)
+      set({ canvasSuggestion: { ...canvasSuggestion, status: 'created_file' } })
+      get().loadTree()
+    } catch (e: any) {
+      set({ aiError: e?.message || 'Create file failed' })
+    }
+  },
+
+  // ── AI Error ──────────────────────────────────────────────────────────────
+  aiError: null,
+  clearAiError: () => set({ aiError: null }),
+
+  // ── Model ──────────────────────────────────────────────────────────────────
   selectedModel: null,
   setSelectedModel: (model) => set({ selectedModel: model }),
   availableModels: [],
@@ -155,144 +343,30 @@ export const useStore = create<AppState>((set, get) => ({
         set({ selectedModel: models[0].id })
       }
     } catch (e) {
-      console.error('Failed to load models:', e)
+      console.error('load models:', e)
     }
   },
 
-  // --- AI Context ---
-  attachedFiles: [],
-  addAttachedFile: (file) => set(s => {
-    if (s.attachedFiles.some(f => f.path === file.path)) return s
-    return { attachedFiles: [...s.attachedFiles, file] }
-  }),
-  removeAttachedFile: (path) => set(s => ({
-    attachedFiles: s.attachedFiles.filter(f => f.path !== path),
-  })),
-  clearAttachedFiles: () => set({ attachedFiles: [] }),
-
-  // --- AI Tool ---
-  activeTool: 'none',
-  setActiveTool: (tool) => set({ activeTool: tool }),
-  searchScope: 'files',
-  setSearchScope: (scope) => set({ searchScope: scope }),
-
-  // --- AI Execution ---
-  aiLoading: false,
-  currentSuggestion: null,
-  aiHistoryByFile: {},
-  executeAi: async (instruction) => {
-    const { activeTabPath, openTabs, activeRepo, selectedModel, attachedFiles, activeTool, searchScope } = get()
-    if (!activeRepo) return
-    const tab = openTabs.find(t => t.path === activeTabPath)
-    const fileKey = activeTabPath || '__global__'
-
-    set({ aiLoading: true, currentSuggestion: null })
-    try {
-      // If search tool: gather context first
-      let extraContext: AttachedFile[] = [...attachedFiles]
-      if (activeTool === 'search' && searchScope === 'files') {
-        try {
-          const results = await api.searchFiles(activeRepo.id, instruction) as any[]
-          for (const r of results.slice(0, 5)) {
-            try {
-              const f = await api.getFile(activeRepo.id, r.path) as any
-              if (!f.is_binary && !extraContext.some(x => x.path === r.path)) {
-                extraContext.push({ path: r.path, content: f.content })
-              }
-            } catch { /* skip */ }
-          }
-        } catch { /* skip */ }
-      }
-
-      const body: any = {
-        instruction,
-        model: selectedModel,
-        scope: tab ? 'full_file' : 'attached_files',
-        attached_files: extraContext,
-      }
-      if (tab) {
-        body.file_path = tab.path
-        body.file_type = tab.name.split('.').pop() || 'txt'
-        body.full_file_content = tab.content
-      }
-
-      const suggestion = await api.executeAi(body) as AiSuggestion
-      set(s => ({
-        currentSuggestion: suggestion,
-        aiLoading: false,
-        aiHistoryByFile: {
-          ...s.aiHistoryByFile,
-          [fileKey]: [suggestion, ...(s.aiHistoryByFile[fileKey] || [])],
-        },
-      }))
-    } catch (e) {
-      console.error('AI execution failed:', e)
-      set({ aiLoading: false })
-    }
-  },
-  acceptSuggestion: async () => {
-    const { currentSuggestion, activeRepo } = get()
-    if (!currentSuggestion || !activeRepo) return
-    try {
-      await api.applyAi(currentSuggestion.id, activeRepo.id)
-      if (currentSuggestion.file_path) {
-        const file = await api.getFile(activeRepo.id, currentSuggestion.file_path) as any
-        set(s => ({
-          currentSuggestion: { ...currentSuggestion, status: 'accepted' },
-          openTabs: s.openTabs.map(t =>
-            t.path === currentSuggestion.file_path
-              ? { ...t, content: file.content, savedContent: file.content, dirty: false }
-              : t
-          ),
-        }))
-      }
-    } catch (e) {
-      console.error('Accept failed:', e)
-    }
-  },
-  rejectSuggestion: () => {
-    const { currentSuggestion } = get()
-    if (!currentSuggestion) return
-    api.rejectAi(currentSuggestion.id).catch(console.error)
-    set(s => ({
-      currentSuggestion: { ...currentSuggestion, status: 'rejected' },
-    }))
-  },
-  createFileFromSuggestion: async (newPath) => {
-    const { currentSuggestion, activeRepo } = get()
-    if (!currentSuggestion || !activeRepo) return
-    try {
-      await api.createFileFromResult(currentSuggestion.id, newPath, activeRepo.id)
-      set({ currentSuggestion: { ...currentSuggestion, status: 'created_file' } })
-      get().loadTree()
-    } catch (e) {
-      console.error('Create file failed:', e)
-    }
-  },
-
-  // --- Session ---
+  // ── Session ────────────────────────────────────────────────────────────────
   restoreSession: async () => {
     try {
-      const session = await api.getSession() as any
-      if (session.selected_model) set({ selectedModel: session.selected_model })
-      if (typeof session.ai_panel_open === 'boolean') set({ aiPanelOpen: session.ai_panel_open })
-    } catch (e) {
-      console.error('Session restore failed:', e)
-    }
+      const s = await api.getSession() as any
+      if (s.selected_model) set({ selectedModel: s.selected_model })
+      if (typeof s.chat_panel_open === 'boolean') set({ chatPanelOpen: s.chat_panel_open })
+    } catch { /* fresh start */ }
   },
   persistSession: async () => {
-    const { activeRepo, openTabs, activeTabPath, selectedModel, aiPanelOpen } = get()
+    const { activeRepo, openTabs, activeTabPath, selectedModel, chatPanelOpen } = get()
     try {
       await api.saveSession({
         active_repo_id: activeRepo?.id ?? null,
         open_tabs: openTabs.map(t => t.path),
         active_tab: activeTabPath,
         selected_model: selectedModel,
-        ai_panel_open: aiPanelOpen,
+        ai_panel_open: false,
+        chat_panel_open: chatPanelOpen,
         file_modes: Object.fromEntries(openTabs.map(t => [t.path, t.mode])),
       })
-    } catch (e) {
-      console.error('Session persist failed:', e)
-    }
+    } catch { /* best effort */ }
   },
 }))
