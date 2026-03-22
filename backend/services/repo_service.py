@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Optional
 from pathlib import Path
 import git
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,7 +44,7 @@ class RepoService:
         await db.refresh(repo_model)
         return RepoInfo(id=repo_model.id, path=repo_model.path, name=repo_model.name, is_remote=False)
 
-    async def connect_remote(self, db: AsyncSession, url: str, name: str | None = None) -> RepoInfo:
+    async def connect_remote(self, db: AsyncSession, url: str, name: Optional[str] = None) -> RepoInfo:
         if not name:
             name = url.rstrip("/").split("/")[-1].replace(".git", "")
 

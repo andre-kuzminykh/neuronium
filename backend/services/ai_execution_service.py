@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Optional
 import uuid
 import time
 from datetime import datetime, timezone
@@ -67,7 +68,7 @@ class AiExecutionService:
             latency_ms=latency_ms,
         )
 
-    async def get_history(self, db: AsyncSession, repo_id: int | None = None, limit: int = 50) -> list[AiSuggestion]:
+    async def get_history(self, db: AsyncSession, repo_id: Optional[int] = None, limit: int = 50) -> list[AiSuggestion]:
         from sqlalchemy import select
 
         query = select(AiCommand).order_by(AiCommand.created_at.desc()).limit(limit)

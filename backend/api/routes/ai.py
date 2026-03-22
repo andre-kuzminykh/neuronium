@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,5 +68,5 @@ async def create_file_from_result(
 
 
 @router.get("/history", response_model=list[AiSuggestion])
-async def get_history(repo_id: int | None = None, limit: int = 50, db: AsyncSession = Depends(get_db)):
+async def get_history(repo_id: Optional[int] = None, limit: int = 50, db: AsyncSession = Depends(get_db)):
     return await ai_execution_service.get_history(db, repo_id, limit)
