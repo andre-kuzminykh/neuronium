@@ -62,3 +62,16 @@ class AutomationRun(Base):
     status = Column(String(20), default="running")
     result_summary = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class FileLink(Base):
+    """Tracks markdown links inserted by dragging files into the editor."""
+    __tablename__ = "file_links"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    repo_id = Column(Integer, nullable=False)
+    source_file = Column(Text, nullable=False)   # file where link lives
+    target_file = Column(Text, nullable=False)   # file being linked to
+    position_start = Column(Integer, nullable=True)  # char offset in source
+    link_text = Column(Text, nullable=False)     # "[name](path)"
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

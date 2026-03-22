@@ -27,14 +27,30 @@ export const api = {
   createFile: (repoId: number, path: string, content = '') =>
     request(`/repo/file/create?repo_id=${repoId}`, { method: 'POST', body: JSON.stringify({ path, content }) }),
 
+  // File links (drag to editor → markdown link)
+  createFileLink: (body: {
+    repo_id: number; source_file: string; target_file: string;
+    position_start?: number; link_text: string;
+  }) => request('/repo/file-links', { method: 'POST', body: JSON.stringify(body) }),
+  getFileLinks: (repoId: number, sourceFile?: string, targetFile?: string) => {
+    const params = new URLSearchParams({ repo_id: String(repoId) })
+    if (sourceFile) params.set('source_file', sourceFile)
+    if (targetFile) params.set('target_file', targetFile)
+    return request(`/repo/file-links?${params}`)
+  },
+
+  // Search
+  searchFiles: (repoId: number, query: string) =>
+    request(`/repo/search?repo_id=${repoId}&query=${encodeURIComponent(query)}`),
+
   // Session
   getSession: () => request('/session/state'),
-  saveSession: (state: any) =>
+  saveSession: (state: unknown) =>
     request('/session/state', { method: 'POST', body: JSON.stringify(state) }),
 
   // AI
   getModels: () => request('/ai/models'),
-  executeAi: (body: any) =>
+  executeAi: (body: unknown) =>
     request('/ai/execute', { method: 'POST', body: JSON.stringify(body) }),
   applyAi: (suggestionId: string, repoId: number) =>
     request(`/ai/apply?repo_id=${repoId}`, { method: 'POST', body: JSON.stringify({ suggestion_id: suggestionId }) }),

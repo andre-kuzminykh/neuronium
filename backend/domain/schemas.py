@@ -125,6 +125,38 @@ class AutomationRunRequest(BaseModel):
     file_paths: list[str]
 
 
+# --- File Links ---
+
+class FileLinkCreate(BaseModel):
+    repo_id: int
+    source_file: str
+    target_file: str
+    position_start: Optional[int] = None
+    link_text: str
+
+
+class FileLinkInfo(BaseModel):
+    id: int
+    repo_id: int
+    source_file: str
+    target_file: str
+    position_start: Optional[int] = None
+    link_text: str
+    created_at: datetime
+
+
+# --- Search ---
+
+class SearchMatch(BaseModel):
+    line: int
+    text: str
+
+
+class SearchResult(BaseModel):
+    path: str
+    matches: list[SearchMatch]
+
+
 # Rebuild model for forward references
 AiExecuteRequest.model_rebuild()
 FileNode.model_rebuild()

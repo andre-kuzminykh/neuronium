@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import type { FileNode, RepoInfo, Tab, AiSuggestion, ModelInfo, AttachedFile, FileMode } from '../types'
 import { api } from '../api/client'
 
+export type SearchScope = 'files' | 'internet'
+
 interface AppState {
   // Repo
   activeRepo: RepoInfo | null
@@ -20,7 +22,7 @@ interface AppState {
   toggleFileMode: (path: string) => void
   getActiveTab: () => Tab | undefined
 
-  // AI Panel
+  // AI Panel (bottom drawer)
   aiPanelOpen: boolean
   toggleAiPanel: () => void
   selectedModel: string | null
@@ -34,23 +36,24 @@ interface AppState {
   removeAttachedFile: (path: string) => void
   clearAttachedFiles: () => void
 
-  // AI Execution
+  // AI Tool (search)
+  activeTool: 'none' | 'search'
+  setActiveTool: (tool: 'none' | 'search') => void
+  searchScope: SearchScope
+  setSearchScope: (scope: SearchScope) => void
+
+  // AI Execution — per-file history
   aiLoading: boolean
   currentSuggestion: AiSuggestion | null
-  aiHistory: AiSuggestion[]
-  executeAi: (instruction: string, selectedText?: string, selectionStart?: number, selectionEnd?: number) => Promise<void>
+  aiHistoryByFile: Record<string, AiSuggestion[]>  // keyed by file path
+  executeAi: (instruction: string) => Promise<void>
   acceptSuggestion: () => Promise<void>
   rejectSuggestion: () => void
   createFileFromSuggestion: (newPath: string) => Promise<void>
-  loadAiHistory: () => Promise<void>
 
   // Session
   restoreSession: () => Promise<void>
   persistSession: () => Promise<void>
-
-  // Command bar
-  commandBarInput: string
-  setCommandBarInput: (v: string) => void
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -86,7 +89,7 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const file = await api.getFile(repo.id, path) as any
       if (file.is_binary) {
-        alert('This file format is not supported in MVP')
+        alert('Формат не поддерживается в MVP')
         return
       }
       const tab: Tab = {
@@ -94,10 +97,7 @@ export const useStore = create<AppState>((set, get) => ({
         content: file.content, savedContent: file.content,
         externallyChanged: false,
       }
-      set(s => ({
-        openTabs: [...s.openTabs, tab],
-        activeTabPath: path,
-      }))
+      set(s => ({ openTabs: [...s.openTabs, tab], activeTabPath: path }))
     } catch (e) {
       console.error('Failed to open file:', e)
     }
@@ -142,7 +142,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // --- AI Panel ---
-  aiPanelOpen: true,
+  aiPanelOpen: false,
   toggleAiPanel: () => set(s => ({ aiPanelOpen: !s.aiPanelOpen })),
   selectedModel: null,
   setSelectedModel: (model) => set({ selectedModel: model }),
@@ -170,38 +170,60 @@ export const useStore = create<AppState>((set, get) => ({
   })),
   clearAttachedFiles: () => set({ attachedFiles: [] }),
 
+  // --- AI Tool ---
+  activeTool: 'none',
+  setActiveTool: (tool) => set({ activeTool: tool }),
+  searchScope: 'files',
+  setSearchScope: (scope) => set({ searchScope: scope }),
+
   // --- AI Execution ---
   aiLoading: false,
   currentSuggestion: null,
-  aiHistory: [],
-  executeAi: async (instruction, selectedText, selectionStart, selectionEnd) => {
-    const { activeTabPath, openTabs, activeRepo, selectedModel, attachedFiles } = get()
+  aiHistoryByFile: {},
+  executeAi: async (instruction) => {
+    const { activeTabPath, openTabs, activeRepo, selectedModel, attachedFiles, activeTool, searchScope } = get()
     if (!activeRepo) return
     const tab = openTabs.find(t => t.path === activeTabPath)
+    const fileKey = activeTabPath || '__global__'
 
     set({ aiLoading: true, currentSuggestion: null })
     try {
+      // If search tool: gather context first
+      let extraContext: AttachedFile[] = [...attachedFiles]
+      if (activeTool === 'search' && searchScope === 'files') {
+        try {
+          const results = await api.searchFiles(activeRepo.id, instruction) as any[]
+          for (const r of results.slice(0, 5)) {
+            try {
+              const f = await api.getFile(activeRepo.id, r.path) as any
+              if (!f.is_binary && !extraContext.some(x => x.path === r.path)) {
+                extraContext.push({ path: r.path, content: f.content })
+              }
+            } catch { /* skip */ }
+          }
+        } catch { /* skip */ }
+      }
+
       const body: any = {
         instruction,
         model: selectedModel,
-        scope: selectedText ? 'selection' : (tab ? 'full_file' : 'attached_files'),
-        attached_files: attachedFiles,
+        scope: tab ? 'full_file' : 'attached_files',
+        attached_files: extraContext,
       }
       if (tab) {
         body.file_path = tab.path
         body.file_type = tab.name.split('.').pop() || 'txt'
         body.full_file_content = tab.content
       }
-      if (selectedText) {
-        body.selected_text = selectedText
-        body.selection_start = selectionStart
-        body.selection_end = selectionEnd
-      }
+
       const suggestion = await api.executeAi(body) as AiSuggestion
       set(s => ({
         currentSuggestion: suggestion,
-        aiHistory: [suggestion, ...s.aiHistory],
         aiLoading: false,
+        aiHistoryByFile: {
+          ...s.aiHistoryByFile,
+          [fileKey]: [suggestion, ...(s.aiHistoryByFile[fileKey] || [])],
+        },
       }))
     } catch (e) {
       console.error('AI execution failed:', e)
@@ -209,11 +231,10 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
   acceptSuggestion: async () => {
-    const { currentSuggestion, activeRepo, activeTabPath, openTabs } = get()
+    const { currentSuggestion, activeRepo } = get()
     if (!currentSuggestion || !activeRepo) return
     try {
       await api.applyAi(currentSuggestion.id, activeRepo.id)
-      // Update local tab content
       if (currentSuggestion.file_path) {
         const file = await api.getFile(activeRepo.id, currentSuggestion.file_path) as any
         set(s => ({
@@ -233,7 +254,9 @@ export const useStore = create<AppState>((set, get) => ({
     const { currentSuggestion } = get()
     if (!currentSuggestion) return
     api.rejectAi(currentSuggestion.id).catch(console.error)
-    set({ currentSuggestion: { ...currentSuggestion, status: 'rejected' } })
+    set(s => ({
+      currentSuggestion: { ...currentSuggestion, status: 'rejected' },
+    }))
   },
   createFileFromSuggestion: async (newPath) => {
     const { currentSuggestion, activeRepo } = get()
@@ -246,23 +269,13 @@ export const useStore = create<AppState>((set, get) => ({
       console.error('Create file failed:', e)
     }
   },
-  loadAiHistory: async () => {
-    try {
-      const history = await api.getAiHistory() as AiSuggestion[]
-      set({ aiHistory: history })
-    } catch (e) {
-      console.error('Failed to load AI history:', e)
-    }
-  },
 
   // --- Session ---
   restoreSession: async () => {
     try {
       const session = await api.getSession() as any
-      if (session.active_repo_id) {
-        // We'd need a getRepo endpoint, for now just set the ID
-        set({ selectedModel: session.selected_model, aiPanelOpen: session.ai_panel_open ?? true })
-      }
+      if (session.selected_model) set({ selectedModel: session.selected_model })
+      if (typeof session.ai_panel_open === 'boolean') set({ aiPanelOpen: session.ai_panel_open })
     } catch (e) {
       console.error('Session restore failed:', e)
     }
@@ -282,8 +295,4 @@ export const useStore = create<AppState>((set, get) => ({
       console.error('Session persist failed:', e)
     }
   },
-
-  // --- Command Bar ---
-  commandBarInput: '',
-  setCommandBarInput: (v) => set({ commandBarInput: v }),
 }))
