@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useStore } from '../../store/useStore'
 import { api } from '../../api/client'
+import { FilePickerDropdown } from '../common/FilePickerDropdown'
 import type { ChatMessage as ChatMessageType, AttachedFile } from '../../types'
 
 function parseSuggestion(text: string): { message: string; suggestion: string | null } {
@@ -66,14 +67,30 @@ export function ChatPanel() {
     }
 
     // Attach file content for context
-    if (!attachedFiles.some(f => f.path === file.path)) {
-      try {
-        const resp = await api.getFile(activeRepo.id, file.path) as any
-        if (!resp.is_binary) {
-          setAttachedFiles(prev => [...prev, { path: file.path, content: resp.content }])
-        }
-      } catch { /* skip */ }
+    await attachFileByPath(file.path)
+  }
+
+  const attachFileByPath = async (path: string) => {
+    if (!activeRepo || attachedFiles.some(f => f.path === path)) return
+    try {
+      const resp = await api.getFile(activeRepo.id, path) as any
+      if (!resp.is_binary) {
+        setAttachedFiles(prev => [...prev, { path, content: resp.content }])
+      }
+    } catch { /* skip */ }
+  }
+
+  const handleFilePick = async (path: string, name: string) => {
+    // Insert link into input
+    const link = `[${name}](${path})`
+    const ir = inputRef.current
+    if (ir) {
+      const start = ir.selectionStart ?? input.length
+      setInput(prev => prev.slice(0, start) + link + prev.slice(start))
+    } else {
+      setInput(prev => prev + link)
     }
+    await attachFileByPath(path)
   }
 
   if (!chatPanelOpen) {
@@ -239,11 +256,12 @@ export function ChatPanel() {
             ))}
           </div>
         )}
-        <div className="flex gap-2">
+        <div className="flex gap-1 items-end">
+          <FilePickerDropdown onSelect={handleFilePick} />
           <input
             ref={inputRef}
             type="text"
-            placeholder={dragOver ? 'Отпусти файл...' : 'Спроси о документе... (перетащи файлы)'}
+            placeholder={dragOver ? 'Отпусти файл...' : 'Спроси о документе...'}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}

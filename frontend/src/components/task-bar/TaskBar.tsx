@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import { useStore } from '../../store/useStore'
+import { FilePickerDropdown } from '../common/FilePickerDropdown'
 
 const TASK_BAR_HEIGHT = 180
 
@@ -57,6 +58,17 @@ export function TaskBar() {
     } catch { /* skip */ }
   }
 
+  const handleFilePick = async (path: string, name: string) => {
+    const link = `[${name}](${path})`
+    insertAtCursor(link)
+    if (!activeRepo) return
+    try {
+      const resp = await fetch(`/api/repo/file?repo_id=${activeRepo.id}&path=${encodeURIComponent(path)}`)
+      const fd = await resp.json()
+      if (!fd.is_binary) addTaskFile({ path, content: fd.content })
+    } catch { /* skip */ }
+  }
+
   const handleSubmit = () => {
     if (!taskInstruction.trim() || taskLoading) return
     runTask()
@@ -109,9 +121,11 @@ export function TaskBar() {
       </div>
 
       <div className="flex flex-1 gap-2 px-3 py-2 min-h-0">
-        {/* Task textarea — drag files here to insert [link] */}
+        {/* Task textarea — drag files here or use 📎 to insert [link] */}
         <div className="flex flex-col flex-1 min-w-0">
-          <textarea
+          <div className="flex gap-1 items-start">
+            <FilePickerDropdown onSelect={handleFilePick} />
+            <textarea
             ref={textareaRef}
             placeholder="Напиши задачу... (перетащи файлы для вставки ссылок)"
             value={taskInstruction}
@@ -127,6 +141,7 @@ export function TaskBar() {
             disabled={taskLoading}
             className="flex-1 bg-ide-bg border border-ide-border rounded px-2 py-1.5 text-sm outline-none focus:border-ide-accent resize-none disabled:opacity-50 font-mono"
           />
+          </div>
 
           {/* Attached files tags */}
           {taskAttachedFiles.length > 0 && (
