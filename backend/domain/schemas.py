@@ -56,6 +56,7 @@ class SessionState(BaseModel):
     active_tab: Optional[str] = None
     selected_model: Optional[str] = None
     ai_panel_open: bool = True
+    chat_panel_open: bool = False
     file_modes: dict[str, str] = {}  # tab_path -> "view"|"edit"
 
 

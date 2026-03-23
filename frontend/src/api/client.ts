@@ -23,6 +23,8 @@ export const api = {
     request('/repo/connect-local', { method: 'POST', body: JSON.stringify({ path }) }),
   connectRemote: (url: string, name?: string) =>
     request('/repo/connect-remote', { method: 'POST', body: JSON.stringify({ url, name }) }),
+  getRepo: (repoId: number) =>
+    request(`/repo/info?repo_id=${repoId}`),
   getTree: (repoId: number, path = '') =>
     request(`/repo/tree?repo_id=${repoId}&path=${encodeURIComponent(path)}`),
   getFile: (repoId: number, path: string) =>
@@ -47,6 +49,14 @@ export const api = {
   // Search
   searchFiles: (repoId: number, query: string) =>
     request(`/repo/search?repo_id=${repoId}&query=${encodeURIComponent(query)}`),
+
+  // Git
+  gitStatus: (repoId: number) =>
+    request(`/repo/git/status?repo_id=${repoId}`),
+  gitCommit: (repoId: number, message: string, files?: string[]) =>
+    request('/repo/git/commit', { method: 'POST', body: JSON.stringify({ repo_id: repoId, message, files }) }),
+  gitPush: (repoId: number) =>
+    request('/repo/git/push', { method: 'POST', body: JSON.stringify({ repo_id: repoId }) }),
 
   // Session
   getSession: () => request('/session/state'),

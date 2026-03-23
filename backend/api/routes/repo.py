@@ -1,7 +1,9 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Optional
+import git
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -17,6 +19,41 @@ from backend.services.file_service import file_service
 from backend.utils.file_types import is_binary_file
 
 router = APIRouter(prefix="/repo", tags=["repository"])
+
+
+# ─── Git request schemas ─────────────────────────────────────────────────────
+
+class GitCommitRequest(BaseModel):
+    repo_id: int
+    message: str
+    files: Optional[list[str]] = None  # None = all changed files
+
+
+class GitPushRequest(BaseModel):
+    repo_id: int
+
+
+class GitStatusFile(BaseModel):
+    path: str
+    status: str  # "modified", "added", "deleted", "untracked"
+
+
+class GitStatusResponse(BaseModel):
+    branch: str
+    changed_files: list[GitStatusFile]
+    has_remote: bool
+
+
+@router.get("/info", response_model=RepoInfo)
+async def get_repo_info(repo_id: int, db: AsyncSession = Depends(get_db)):
+    """Get repository info by ID (used to restore session)."""
+    try:
+        repo = await repo_service.get_repo(db, repo_id)
+        if not Path(repo.path).exists():
+            raise HTTPException(status_code=404, detail="Repository path no longer exists on disk")
+        return RepoInfo(id=repo.id, path=repo.path, name=repo.name, is_remote=repo.is_remote)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.post("/connect-local", response_model=RepoInfo)
@@ -80,22 +117,25 @@ async def create_file(repo_id: int, req: FileCreateRequest, db: AsyncSession = D
 @router.post("/file-links", response_model=FileLinkInfo)
 async def create_file_link(req: FileLinkCreate, db: AsyncSession = Depends(get_db)):
     """Store a markdown link relationship inserted by drag-and-drop."""
-    link = FileLinkModel(
-        repo_id=req.repo_id,
-        source_file=req.source_file,
-        target_file=req.target_file,
-        position_start=req.position_start,
-        link_text=req.link_text,
-    )
-    db.add(link)
-    await db.commit()
-    await db.refresh(link)
-    return FileLinkInfo(
-        id=link.id, repo_id=link.repo_id,
-        source_file=link.source_file, target_file=link.target_file,
-        position_start=link.position_start, link_text=link.link_text,
-        created_at=link.created_at,
-    )
+    try:
+        link = FileLinkModel(
+            repo_id=req.repo_id,
+            source_file=req.source_file,
+            target_file=req.target_file,
+            position_start=req.position_start,
+            link_text=req.link_text,
+        )
+        db.add(link)
+        await db.commit()
+        await db.refresh(link)
+        return FileLinkInfo(
+            id=link.id, repo_id=link.repo_id,
+            source_file=link.source_file, target_file=link.target_file,
+            position_start=link.position_start, link_text=link.link_text,
+            created_at=link.created_at,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/file-links", response_model=list[FileLinkInfo])
@@ -165,3 +205,89 @@ async def search_files(
             break
 
     return results
+
+
+# ─── Git Operations ──────────────────────────────────────────────────────────
+
+@router.get("/git/status", response_model=GitStatusResponse)
+async def git_status(repo_id: int, db: AsyncSession = Depends(get_db)):
+    """Get git status of the repository."""
+    try:
+        repo_model = await repo_service.get_repo(db, repo_id)
+        repo = git.Repo(repo_model.path)
+    except (FileNotFoundError, git.InvalidGitRepositoryError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    changed: list[GitStatusFile] = []
+
+    # Modified/staged files
+    for item in repo.index.diff(None):
+        changed.append(GitStatusFile(path=item.a_path, status="modified"))
+    for item in repo.index.diff("HEAD"):
+        changed.append(GitStatusFile(path=item.a_path, status="staged"))
+
+    # Untracked files
+    for path in repo.untracked_files:
+        changed.append(GitStatusFile(path=path, status="untracked"))
+
+    # Deleted
+    for item in repo.index.diff(None).iter_change_type("D"):
+        # already handled above, skip duplicates
+        pass
+
+    branch = repo.active_branch.name if not repo.head.is_detached else "HEAD"
+    has_remote = len(repo.remotes) > 0
+
+    return GitStatusResponse(branch=branch, changed_files=changed, has_remote=has_remote)
+
+
+@router.post("/git/commit")
+async def git_commit(req: GitCommitRequest, db: AsyncSession = Depends(get_db)):
+    """Commit changes to git."""
+    try:
+        repo_model = await repo_service.get_repo(db, req.repo_id)
+        repo = git.Repo(repo_model.path)
+    except (FileNotFoundError, git.InvalidGitRepositoryError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        if req.files:
+            repo.index.add(req.files)
+        else:
+            # Add all changed and untracked files
+            repo.git.add(A=True)
+
+        if not repo.index.diff("HEAD") and not repo.untracked_files:
+            raise HTTPException(status_code=400, detail="Nothing to commit")
+
+        commit = repo.index.commit(req.message)
+        return {"status": "ok", "commit_sha": str(commit.hexsha)[:8], "message": req.message}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/git/push")
+async def git_push(req: GitPushRequest, db: AsyncSession = Depends(get_db)):
+    """Push commits to remote."""
+    try:
+        repo_model = await repo_service.get_repo(db, req.repo_id)
+        repo = git.Repo(repo_model.path)
+    except (FileNotFoundError, git.InvalidGitRepositoryError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not repo.remotes:
+        raise HTTPException(status_code=400, detail="No remote configured")
+
+    try:
+        origin = repo.remotes.origin
+        push_info = origin.push()
+        errors = [p.summary for p in push_info if p.flags & p.ERROR]
+        if errors:
+            raise HTTPException(status_code=400, detail="; ".join(errors))
+        return {"status": "ok"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

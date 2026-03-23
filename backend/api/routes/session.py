@@ -15,5 +15,9 @@ async def get_state(db: AsyncSession = Depends(get_db)):
 
 @router.post("/state")
 async def save_state(state: SessionState, db: AsyncSession = Depends(get_db)):
-    await session_service.save_state(db, state)
-    return {"status": "ok"}
+    try:
+        await session_service.save_state(db, state)
+        return {"status": "ok"}
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))

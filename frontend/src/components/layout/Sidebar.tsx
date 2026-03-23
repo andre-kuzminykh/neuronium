@@ -1,5 +1,6 @@
 import { useStore } from '../../store/useStore'
 import { FileTree } from '../file-tree/FileTree'
+import { GitPanel } from '../git/GitPanel'
 
 export function Sidebar() {
   const { activeRepo } = useStore()
@@ -12,6 +13,7 @@ export function Sidebar() {
       <div className="flex-1 overflow-y-auto">
         <FileTree />
       </div>
+      <GitPanel />
     </div>
   )
 }

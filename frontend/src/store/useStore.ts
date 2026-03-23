@@ -354,6 +354,12 @@ export const useStore = create<AppState>((set, get) => ({
       const s = await api.getSession() as any
       if (s.selected_model) set({ selectedModel: s.selected_model })
       if (typeof s.chat_panel_open === 'boolean') set({ chatPanelOpen: s.chat_panel_open })
+      if (s.active_repo_id) {
+        try {
+          const repo = await api.getRepo(s.active_repo_id) as RepoInfo
+          get().setActiveRepo(repo)
+        } catch { /* repo no longer exists, show connect dialog */ }
+      }
     } catch { /* fresh start */ }
   },
   persistSession: async () => {
