@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useStore } from '../../store/useStore'
 import { api } from '../../api/client'
-import { FilePickerDropdown } from '../common/FilePickerDropdown'
 import type { ChatMessage as ChatMessageType, AttachedFile } from '../../types'
 
 function parseSuggestion(text: string): { message: string; suggestion: string | null } {
@@ -67,30 +66,14 @@ export function ChatPanel() {
     }
 
     // Attach file content for context
-    await attachFileByPath(file.path)
-  }
-
-  const attachFileByPath = async (path: string) => {
-    if (!activeRepo || attachedFiles.some(f => f.path === path)) return
-    try {
-      const resp = await api.getFile(activeRepo.id, path) as any
-      if (!resp.is_binary) {
-        setAttachedFiles(prev => [...prev, { path, content: resp.content }])
-      }
-    } catch { /* skip */ }
-  }
-
-  const handleFilePick = async (path: string, name: string) => {
-    // Insert link into input
-    const link = `[${name}](${path})`
-    const ir = inputRef.current
-    if (ir) {
-      const start = ir.selectionStart ?? input.length
-      setInput(prev => prev.slice(0, start) + link + prev.slice(start))
-    } else {
-      setInput(prev => prev + link)
+    if (!attachedFiles.some(f => f.path === file.path)) {
+      try {
+        const resp = await api.getFile(activeRepo.id, file.path) as any
+        if (!resp.is_binary) {
+          setAttachedFiles(prev => [...prev, { path: file.path, content: resp.content }])
+        }
+      } catch { /* skip */ }
     }
-    await attachFileByPath(path)
   }
 
   if (!chatPanelOpen) {
@@ -236,17 +219,22 @@ export function ChatPanel() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
+      {/* Input — drop files here */}
       <div
-        className={`px-3 py-2 border-t shrink-0 ${dragOver ? 'border-ide-accent bg-ide-accent/10' : 'border-ide-border'}`}
+        className={`px-3 py-2 border-t shrink-0 transition-colors ${dragOver ? 'border-ide-accent border-dashed bg-ide-accent/10' : 'border-ide-border'}`}
         onDrop={handleDrop}
         onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'link'; setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
       >
+        {dragOver && (
+          <div className="text-center text-xs text-ide-accent font-semibold py-1 mb-1">
+            Отпусти файл сюда
+          </div>
+        )}
         {attachedFiles.length > 0 && (
           <div className="flex flex-wrap gap-1 mb-1.5">
             {attachedFiles.map(f => (
-              <span key={f.path} className="flex items-center gap-0.5 px-1.5 py-0.5 bg-ide-tab rounded text-[10px]">
+              <span key={f.path} className="flex items-center gap-0.5 px-1.5 py-0.5 bg-ide-accent/20 border border-ide-accent/30 rounded text-[10px] text-ide-accent">
                 📄 {f.path.split('/').pop()}
                 <button
                   onClick={() => setAttachedFiles(prev => prev.filter(a => a.path !== f.path))}
@@ -256,12 +244,11 @@ export function ChatPanel() {
             ))}
           </div>
         )}
-        <div className="flex gap-1 items-end">
-          <FilePickerDropdown onSelect={handleFilePick} />
+        <div className="flex gap-2">
           <input
             ref={inputRef}
             type="text"
-            placeholder={dragOver ? 'Отпусти файл...' : 'Спроси о документе...'}
+            placeholder="Спроси о документе... (перетащи файлы сюда)"
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}

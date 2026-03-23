@@ -1,6 +1,5 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useStore } from '../../store/useStore'
-import { FilePickerDropdown } from '../common/FilePickerDropdown'
 
 const TASK_BAR_HEIGHT = 180
 
@@ -21,6 +20,7 @@ export function TaskBar() {
   } = useStore()
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [dragOver, setDragOver] = useState(false)
 
   // Insert text at cursor in textarea
   const insertAtCursor = (text: string) => {
@@ -42,6 +42,7 @@ export function TaskBar() {
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
+    setDragOver(false)
     const data = e.dataTransfer.getData('application/neuronium-file')
     if (!data || !activeRepo) return
     const file = JSON.parse(data)
@@ -55,17 +56,6 @@ export function TaskBar() {
       const resp = await fetch(`/api/repo/file?repo_id=${activeRepo.id}&path=${encodeURIComponent(file.path)}`)
       const fd = await resp.json()
       if (!fd.is_binary) addTaskFile({ path: file.path, content: fd.content })
-    } catch { /* skip */ }
-  }
-
-  const handleFilePick = async (path: string, name: string) => {
-    const link = `[${name}](${path})`
-    insertAtCursor(link)
-    if (!activeRepo) return
-    try {
-      const resp = await fetch(`/api/repo/file?repo_id=${activeRepo.id}&path=${encodeURIComponent(path)}`)
-      const fd = await resp.json()
-      if (!fd.is_binary) addTaskFile({ path, content: fd.content })
     } catch { /* skip */ }
   }
 
@@ -121,34 +111,43 @@ export function TaskBar() {
       </div>
 
       <div className="flex flex-1 gap-2 px-3 py-2 min-h-0">
-        {/* Task textarea — drag files here or use 📎 to insert [link] */}
+        {/* Task textarea — drag files here to insert [link] */}
         <div className="flex flex-col flex-1 min-w-0">
-          <div className="flex gap-1 items-start">
-            <FilePickerDropdown onSelect={handleFilePick} />
+          <div className="relative flex-1">
             <textarea
-            ref={textareaRef}
-            placeholder="Напиши задачу... (перетащи файлы для вставки ссылок)"
-            value={taskInstruction}
-            onChange={e => setTaskInstruction(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault()
-                handleSubmit()
-              }
-            }}
-            onDrop={handleDrop}
-            onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'link' }}
-            disabled={taskLoading}
-            className="flex-1 bg-ide-bg border border-ide-border rounded px-2 py-1.5 text-sm outline-none focus:border-ide-accent resize-none disabled:opacity-50 font-mono"
-          />
+              ref={textareaRef}
+              placeholder="Напиши задачу... (перетащи файлы из дерева сюда)"
+              value={taskInstruction}
+              onChange={e => setTaskInstruction(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault()
+                  handleSubmit()
+                }
+              }}
+              onDrop={handleDrop}
+              onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'link'; setDragOver(true) }}
+              onDragLeave={() => setDragOver(false)}
+              disabled={taskLoading}
+              className={`w-full h-full bg-ide-bg border rounded px-2 py-1.5 text-sm outline-none resize-none disabled:opacity-50 font-mono transition-colors ${
+                dragOver ? 'border-ide-accent border-dashed bg-ide-accent/10' : 'border-ide-border focus:border-ide-accent'
+              }`}
+            />
+            {dragOver && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <span className="text-xs text-ide-accent font-semibold bg-ide-sidebar/90 px-2 py-1 rounded">
+                  Отпусти файл сюда
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Attached files tags */}
           {taskAttachedFiles.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1">
               {taskAttachedFiles.map(f => (
-                <span key={f.path} className="flex items-center gap-0.5 px-1.5 py-0.5 bg-ide-tab rounded text-xs">
-                  {f.path.split('/').pop()}
+                <span key={f.path} className="flex items-center gap-0.5 px-1.5 py-0.5 bg-ide-accent/20 border border-ide-accent/30 rounded text-xs text-ide-accent">
+                  📄 {f.path.split('/').pop()}
                   <button
                     onClick={() => removeTaskFile(f.path)}
                     className="text-ide-text-dim hover:text-ide-error ml-0.5"
