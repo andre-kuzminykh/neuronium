@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useStore } from '../../store/useStore'
-import type { ChatMessage as ChatMessageType } from '../../types'
+import { api } from '../../api/client'
+import type { ChatMessage as ChatMessageType, AttachedFile } from '../../types'
 
 function parseSuggestion(text: string): { message: string; suggestion: string | null } {
   const startTag = '<<<SUGGESTION>>>'
@@ -26,10 +27,14 @@ export function ChatPanel() {
   } = useStore()
 
   const [input, setInput] = useState('')
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([])
+  const [dragOver, setDragOver] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   const fileKey = activeTabPath || '__global__'
   const messages = chatMessages[fileKey] || []
   const activeTab = openTabs.find(t => t.path === activeTabPath)
+  const { activeRepo } = useStore()
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -39,6 +44,36 @@ export function ChatPanel() {
     if (!input.trim() || chatLoading) return
     sendChatMessage(input)
     setInput('')
+    setAttachedFiles([])
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    const data = e.dataTransfer.getData('application/neuronium-file')
+    if (!data || !activeRepo) return
+    const file = JSON.parse(data)
+    if (file.is_dir) return
+
+    // Insert file link into input
+    const link = `[${file.name}](${file.path})`
+    const ir = inputRef.current
+    if (ir) {
+      const start = ir.selectionStart ?? input.length
+      setInput(input.slice(0, start) + link + input.slice(start))
+    } else {
+      setInput(input + link)
+    }
+
+    // Attach file content for context
+    if (!attachedFiles.some(f => f.path === file.path)) {
+      try {
+        const resp = await api.getFile(activeRepo.id, file.path) as any
+        if (!resp.is_binary) {
+          setAttachedFiles(prev => [...prev, { path: file.path, content: resp.content }])
+        }
+      } catch { /* skip */ }
+    }
   }
 
   if (!chatPanelOpen) {
@@ -185,11 +220,30 @@ export function ChatPanel() {
       </div>
 
       {/* Input */}
-      <div className="px-3 py-2 border-t border-ide-border shrink-0">
+      <div
+        className={`px-3 py-2 border-t shrink-0 ${dragOver ? 'border-ide-accent bg-ide-accent/10' : 'border-ide-border'}`}
+        onDrop={handleDrop}
+        onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'link'; setDragOver(true) }}
+        onDragLeave={() => setDragOver(false)}
+      >
+        {attachedFiles.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-1.5">
+            {attachedFiles.map(f => (
+              <span key={f.path} className="flex items-center gap-0.5 px-1.5 py-0.5 bg-ide-tab rounded text-[10px]">
+                📄 {f.path.split('/').pop()}
+                <button
+                  onClick={() => setAttachedFiles(prev => prev.filter(a => a.path !== f.path))}
+                  className="text-ide-text-dim hover:text-ide-error ml-0.5"
+                >✕</button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="flex gap-2">
           <input
+            ref={inputRef}
             type="text"
-            placeholder="Спроси о документе..."
+            placeholder={dragOver ? 'Отпусти файл...' : 'Спроси о документе... (перетащи файлы)'}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}

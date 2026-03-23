@@ -146,49 +146,40 @@ export function TaskBar() {
 
         {/* Right controls */}
         <div className="flex flex-col gap-1.5 min-w-[110px]">
-          {/* Tool selector */}
-          <div className="text-xs text-ide-text-dim mb-0.5">Инструмент</div>
-          <div className="flex flex-col gap-1 text-xs">
-            <label className="flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="radio" name="tool" value="none"
-                checked={activeTool === 'none'}
-                onChange={() => setActiveTool('none')}
-                className="accent-ide-accent"
-              />
-              <span className={activeTool === 'none' ? 'text-ide-text' : 'text-ide-text-dim'}>Без инструмента</span>
-            </label>
-            <label className="flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="radio" name="tool" value="search"
-                checked={activeTool === 'search'}
-                onChange={() => setActiveTool('search')}
-                className="accent-ide-accent"
-              />
-              <span className={activeTool === 'search' ? 'text-ide-text' : 'text-ide-text-dim'}>Поиск</span>
-            </label>
-          </div>
+          {/* Search toggle */}
+          <button
+            onClick={() => setActiveTool(activeTool === 'search' ? 'none' : 'search')}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs border transition-colors ${
+              activeTool === 'search'
+                ? 'bg-ide-accent/20 border-ide-accent text-ide-accent'
+                : 'bg-ide-tab border-ide-border text-ide-text-dim hover:text-ide-text'
+            }`}
+          >
+            🔍 Поиск
+          </button>
 
           {activeTool === 'search' && (
-            <div className="flex flex-col gap-1 pl-3 text-xs border-l border-ide-border">
-              <label className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="radio" name="scope" value="files"
-                  checked={searchScope === 'files'}
-                  onChange={() => setSearchScope('files')}
-                  className="accent-ide-accent"
-                />
-                <span className={searchScope === 'files' ? 'text-ide-text' : 'text-ide-text-dim'}>Файлы</span>
-              </label>
-              <label className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="radio" name="scope" value="internet"
-                  checked={searchScope === 'internet'}
-                  onChange={() => setSearchScope('internet')}
-                  className="accent-ide-accent"
-                />
-                <span className={searchScope === 'internet' ? 'text-ide-text' : 'text-ide-text-dim'}>Интернет</span>
-              </label>
+            <div className="flex rounded overflow-hidden border border-ide-border text-xs">
+              <button
+                onClick={() => setSearchScope('files')}
+                className={`flex-1 px-2 py-1 transition-colors ${
+                  searchScope === 'files'
+                    ? 'bg-ide-accent text-white'
+                    : 'bg-ide-tab text-ide-text-dim hover:text-ide-text'
+                }`}
+              >
+                Файлы
+              </button>
+              <button
+                onClick={() => setSearchScope('internet')}
+                className={`flex-1 px-2 py-1 transition-colors ${
+                  searchScope === 'internet'
+                    ? 'bg-ide-accent text-white'
+                    : 'bg-ide-tab text-ide-text-dim hover:text-ide-text'
+                }`}
+              >
+                Интернет
+              </button>
             </div>
           )}
 
